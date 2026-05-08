@@ -12,8 +12,8 @@
         <el-button :icon="Star" :type="favoriteOnly ? 'warning' : ''" @click="toggleFavoriteFilter">
           收藏夹 {{ favoriteIds.length }}
         </el-button>
-        <el-button :icon="DataLine" :disabled="compareItems.length < 2" @click="openCompareDrawer">
-          对比 {{ compareItems.length }}
+        <el-button :icon="DataLine" :type="compareItems.length >= 2 ? 'primary' : ''" @click="openCompareDrawer">
+          {{ compareItems.length >= 2 ? '打开对比' : '选择对比' }} {{ compareItems.length }}
         </el-button>
         <el-button :icon="Download" @click="exportCsv">导出结果</el-button>
         <el-button type="primary" :icon="Plus" @click="openAddDialog">新增经验</el-button>
@@ -201,6 +201,16 @@
               :type="isFavorite(row) ? 'warning' : 'info'"
               :icon="isFavorite(row) ? StarFilled : Star"
               @click="toggleFavorite(row)"
+            />
+          </template>
+        </el-table-column>
+
+        <el-table-column label="对比" width="84" align="center">
+          <template #default="{ row }">
+            <el-checkbox
+              :model-value="isInCompare(row)"
+              :disabled="!isInCompare(row) && compareItems.length >= 4"
+              @change="toggleCompare(row)"
             />
           </template>
         </el-table-column>
@@ -669,11 +679,24 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="templateVisible" title="经验写作模板" width="960px">
+    <el-dialog v-model="templateVisible" title="经验写作模板" width="1040px">
+      <div class="template-toolbar">
+        <div>
+          <strong>模板库</strong>
+          <span>内置模板 + 你自己新增的模板都会显示在这里</span>
+        </div>
+        <div>
+          <el-button :icon="Plus" @click="openTemplateCreate">新增模板</el-button>
+          <el-button :icon="DocumentCopy" @click="saveCurrentAsTemplate">保存当前表单为模板</el-button>
+        </div>
+      </div>
       <div class="template-grid">
-        <div v-for="item in experienceTemplates" :key="item.name" class="template-card">
+        <div v-for="item in experienceTemplates" :key="item.id || item.name" class="template-card">
           <div>
-            <strong>{{ item.name }}</strong>
+            <div class="template-title-row">
+              <strong>{{ item.name }}</strong>
+              <el-tag v-if="item.custom" type="success" size="small" effect="plain">自定义</el-tag>
+            </div>
             <p>{{ item.desc }}</p>
           </div>
           <div class="template-tags">
@@ -681,9 +704,58 @@
               {{ tagItem }}
             </el-tag>
           </div>
-          <el-button type="primary" plain @click="applyTemplate(item)">套用模板</el-button>
+          <div class="template-actions">
+            <el-button type="primary" plain @click="applyTemplate(item)">套用模板</el-button>
+            <el-button v-if="item.custom" type="danger" plain @click="deleteCustomTemplate(item)">删除</el-button>
+          </div>
         </div>
       </div>
+    </el-dialog>
+
+    <el-dialog v-model="templateFormVisible" title="新增自定义模板" width="760px">
+      <el-form :model="templateForm" label-width="96px">
+        <el-form-item label="模板名称">
+          <el-input v-model="templateForm.name" placeholder="如：上线风险复盘模板" />
+        </el-form-item>
+        <el-form-item label="模板说明">
+          <el-input v-model="templateForm.desc" placeholder="说明这个模板适合什么场景" />
+        </el-form-item>
+        <div class="form-grid">
+          <el-form-item label="问题类型">
+            <el-input v-model="templateForm.data.problemType" />
+          </el-form-item>
+          <el-form-item label="风险等级">
+            <el-select v-model="templateForm.data.riskLevel">
+              <el-option v-for="item in riskLevelOptions" :key="item" :label="item" :value="item" />
+            </el-select>
+          </el-form-item>
+        </div>
+        <el-form-item label="标签">
+          <el-input v-model="templateForm.data.tags" placeholder="多个标签用逗号分隔" />
+        </el-form-item>
+        <el-form-item label="复用场景">
+          <el-input v-model="templateForm.data.reuseScenario" type="textarea" :rows="2" />
+        </el-form-item>
+        <el-form-item label="场景描述">
+          <el-input v-model="templateForm.data.sceneDesc" type="textarea" :rows="2" />
+        </el-form-item>
+        <el-form-item label="问题描述">
+          <el-input v-model="templateForm.data.problemDesc" type="textarea" :rows="2" />
+        </el-form-item>
+        <el-form-item label="原因分析">
+          <el-input v-model="templateForm.data.reasonAnalysis" type="textarea" :rows="2" />
+        </el-form-item>
+        <el-form-item label="解决方案">
+          <el-input v-model="templateForm.data.solution" type="textarea" :rows="2" />
+        </el-form-item>
+        <el-form-item label="经验总结">
+          <el-input v-model="templateForm.data.summary" type="textarea" :rows="2" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="templateFormVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveCustomTemplate">保存模板</el-button>
+      </template>
     </el-dialog>
 
     <el-drawer v-model="compareVisible" title="经验对比" size="72%">
@@ -694,7 +766,31 @@
           <el-button type="danger" plain @click="clearCompare">清空对比</el-button>
         </div>
       </div>
-      <el-table :data="compareRows" border style="width: 100%">
+
+      <div v-if="compareItems.length" class="compare-selected-list">
+        <div v-for="item in compareItems" :key="item.id" class="compare-selected-item">
+          <span>{{ item.title }}</span>
+          <el-button link type="danger" @click="removeCompare(item)">移出</el-button>
+        </div>
+      </div>
+
+      <el-alert
+        v-if="compareItems.length < 2"
+        title="至少选择 2 条经验后即可生成横向对比。你可以在列表勾选，也可以从下方快捷加入。"
+        type="info"
+        show-icon
+        :closable="false"
+      />
+
+      <div v-if="compareItems.length < 2" class="compare-candidate-grid">
+        <div v-for="item in compareCandidates" :key="item.id" class="compare-candidate-card">
+          <strong>{{ item.title }}</strong>
+          <p>{{ item.projectName || '未填写项目' }} · {{ item.problemType || '综合管理' }}</p>
+          <el-button size="small" type="primary" plain @click="toggleCompare(item)">加入对比</el-button>
+        </div>
+      </div>
+
+      <el-table v-if="compareItems.length >= 2" :data="compareRows" border style="width: 100%">
         <el-table-column prop="label" label="对比项" width="140" fixed />
         <el-table-column
           v-for="item in compareItems"
@@ -751,6 +847,7 @@ const STORAGE_KEYS = {
   compare: 'experience_compare_items',
   notes: 'experience_personal_notes',
   recent: 'experience_recent_views',
+  templates: 'experience_custom_templates',
 }
 
 function readStorage(key, fallback) {
@@ -799,9 +896,10 @@ const recentViews = ref(readStorage(STORAGE_KEYS.recent, []))
 const noteMap = ref(readStorage(STORAGE_KEYS.notes, {}))
 const currentNote = ref('')
 const templateVisible = ref(false)
+const templateFormVisible = ref(false)
 const compareVisible = ref(false)
 
-const experienceTemplates = [
+const builtInTemplates = [
   {
     name: '需求变更复盘',
     desc: '适合记录需求范围、变更评审、客户确认和延期预防。',
@@ -867,6 +965,33 @@ const experienceTemplates = [
     },
   },
 ]
+
+const createEmptyTemplateForm = () => ({
+  id: null,
+  name: '',
+  desc: '',
+  custom: true,
+  data: {
+    problemType: '',
+    riskLevel: '中',
+    tags: '',
+    reuseScenario: '',
+    referenceValueScore: 80,
+    sceneDesc: '',
+    problemDesc: '',
+    reasonAnalysis: '',
+    solution: '',
+    summary: '',
+  },
+})
+
+const customTemplates = ref(readStorage(STORAGE_KEYS.templates, []))
+const templateForm = ref(createEmptyTemplateForm())
+
+const experienceTemplates = computed(() => [
+  ...builtInTemplates.map((item) => ({ ...item, custom: false })),
+  ...customTemplates.value,
+])
 
 const detailVisible = ref(false)
 const detailData = ref(null)
@@ -998,6 +1123,12 @@ const compareRows = computed(() => {
       values,
     }
   })
+})
+
+const compareCandidates = computed(() => {
+  return visibleTableData.value
+    .filter((item) => !isInCompare(item))
+    .slice(0, 6)
 })
 
 function createEmptyForm() {
@@ -1188,6 +1319,79 @@ const applyTemplate = (template) => {
   ElMessage.success(`已套用「${template.name}」`)
 }
 
+const openTemplateCreate = () => {
+  templateForm.value = createEmptyTemplateForm()
+  templateFormVisible.value = true
+}
+
+const saveCurrentAsTemplate = () => {
+  const hasContent = formData.value.title || formData.value.problemDesc || formData.value.solution || formData.value.summary
+  if (!hasContent) {
+    ElMessage.warning('当前表单还没有可保存为模板的内容')
+    return
+  }
+
+  templateForm.value = {
+    id: Date.now(),
+    name: formData.value.title ? `${formData.value.title}模板` : '自定义经验模板',
+    desc: '由当前经验表单保存生成，可在新增经验时复用。',
+    custom: true,
+    data: {
+      problemType: formData.value.problemType || '',
+      riskLevel: formData.value.riskLevel || '中',
+      tags: formData.value.tags || '',
+      reuseScenario: formData.value.reuseScenario || '',
+      referenceValueScore: formData.value.referenceValueScore || 80,
+      sceneDesc: formData.value.sceneDesc || '',
+      problemDesc: formData.value.problemDesc || '',
+      reasonAnalysis: formData.value.reasonAnalysis || '',
+      solution: formData.value.solution || '',
+      summary: formData.value.summary || '',
+    },
+  }
+  templateFormVisible.value = true
+}
+
+const saveCustomTemplate = () => {
+  if (!templateForm.value.name.trim()) {
+    ElMessage.warning('请输入模板名称')
+    return
+  }
+
+  const nextTemplate = {
+    ...templateForm.value,
+    id: templateForm.value.id || Date.now(),
+    name: templateForm.value.name.trim(),
+    desc: templateForm.value.desc.trim() || '自定义经验模板',
+    custom: true,
+    data: {
+      ...templateForm.value.data,
+      referenceValueScore: normalizeScore(templateForm.value.data.referenceValueScore || 80),
+    },
+  }
+  customTemplates.value = [
+    nextTemplate,
+    ...customTemplates.value.filter((item) => item.id !== nextTemplate.id),
+  ]
+  persistTemplates()
+  templateFormVisible.value = false
+  ElMessage.success('模板已保存')
+}
+
+const deleteCustomTemplate = async (template) => {
+  try {
+    await ElMessageBox.confirm(`确认删除模板「${template.name}」？`, '删除模板', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+    customTemplates.value = customTemplates.value.filter((item) => item.id !== template.id)
+    persistTemplates()
+    ElMessage.success('模板已删除')
+  } catch (error) {
+  }
+}
+
 const openEditDialog = async (row) => {
   try {
     const res = await getExperienceById(row.id)
@@ -1326,6 +1530,10 @@ const persistRecent = () => {
   writeStorage(STORAGE_KEYS.recent, recentViews.value)
 }
 
+const persistTemplates = () => {
+  writeStorage(STORAGE_KEYS.templates, customTemplates.value)
+}
+
 const isFavorite = (row) => {
   return !!row?.id && favoriteIds.value.includes(Number(row.id))
 }
@@ -1383,11 +1591,12 @@ const toggleCompare = (row) => {
   persistCompare()
 }
 
+const removeCompare = (row) => {
+  compareItems.value = compareItems.value.filter((item) => Number(item.id) !== Number(row.id))
+  persistCompare()
+}
+
 const openCompareDrawer = () => {
-  if (compareItems.value.length < 2) {
-    ElMessage.warning('至少选择 2 条经验再进行对比')
-    return
-  }
   compareVisible.value = true
 }
 
@@ -2168,6 +2377,29 @@ onMounted(() => {
   line-height: 1.8;
 }
 
+.template-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+}
+
+.template-toolbar strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #111827;
+}
+
+.template-toolbar span {
+  color: #6b7280;
+  font-size: 13px;
+}
+
 .template-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2196,6 +2428,21 @@ onMounted(() => {
   line-height: 1.6;
 }
 
+.template-title-row,
+.template-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.template-title-row {
+  justify-content: space-between;
+}
+
+.template-actions {
+  justify-content: flex-end;
+}
+
 .template-tags {
   display: flex;
   flex-wrap: wrap;
@@ -2217,6 +2464,59 @@ onMounted(() => {
   line-height: 1.7;
 }
 
+.compare-selected-list,
+.compare-candidate-grid {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.compare-selected-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.compare-selected-item,
+.compare-candidate-card {
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+}
+
+.compare-selected-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.compare-selected-item span {
+  overflow: hidden;
+  color: #111827;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compare-candidate-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.compare-candidate-card strong {
+  display: block;
+  color: #111827;
+  margin-bottom: 6px;
+  line-height: 1.45;
+}
+
+.compare-candidate-card p {
+  margin: 0 0 12px;
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 @media (max-width: 1320px) {
   .filter-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2231,6 +2531,7 @@ onMounted(() => {
   .workbench,
   .filter-footer,
   .detail-heading,
+  .template-toolbar,
   .compare-toolbar {
     flex-direction: column;
     align-items: stretch;
@@ -2245,7 +2546,9 @@ onMounted(() => {
   .reuse-report-hero,
   .report-meta-grid,
   .report-section-grid,
-  .template-grid {
+  .template-grid,
+  .compare-selected-list,
+  .compare-candidate-grid {
     grid-template-columns: 1fr;
   }
 
