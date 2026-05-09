@@ -425,14 +425,27 @@
       </el-card>
       <el-card class="feature-card" shadow="never">
         <template #header>
-          <span>本周运营动作</span>
+          <div class="card-header">
+            <span>全局工作留痕</span>
+            <el-tag type="success" effect="plain">{{ recentOperationList.length }} 条</el-tag>
+          </div>
         </template>
-        <ol class="suggestion-list">
-          <li>挑选 3 条高价值经验推送给项目负责人，推动复用任务落地。</li>
-          <li>清理无标签、低完整度经验，提升检索和推荐质量。</li>
-          <li>对高浏览低采纳经验补充“适用场景”和“执行步骤”。</li>
-          <li>将高风险经验沉淀为上线、评审、验收检查项。</li>
-        </ol>
+        <div v-if="recentOperationList.length" class="audit-list">
+          <div v-for="item in recentOperationList" :key="item.id" class="audit-item">
+            <div>
+              <div class="audit-head">
+                <el-tag size="small" :type="operationTagType(item.operationType)" effect="light">
+                  {{ operationTypeLabel(item.operationType) }}
+                </el-tag>
+                <strong>{{ item.operatorName || '系统用户' }}</strong>
+              </div>
+              <p>{{ operationTargetTitle(item) }}</p>
+              <span>{{ item.operationContent || '暂无操作说明' }}</span>
+            </div>
+            <em>{{ formatDate(item.createTime) }}</em>
+          </div>
+        </div>
+        <el-empty v-else description="暂无工作留痕" />
       </el-card>
     </section>
 
@@ -489,12 +502,13 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { DocumentCopy, Plus, Refresh } from '@element-plus/icons-vue'
-import { getDashboardData, getExperienceList } from '../api/experience'
+import { getDashboardData, getExperienceList, getRecentOperationRecordList } from '../api/experience'
 
 const route = useRoute()
 const experienceList = ref([])
 const dashboard = ref({})
 const loading = ref(false)
+const recentOperationList = ref([])
 const taskDialogVisible = ref(false)
 const taskForm = ref({
   title: '',
@@ -583,9 +597,9 @@ const configs = {
     desc: '查看和维护本地增强功能的数据，包括收藏、对比、笔记和任务。',
   },
   operations: {
-    title: '运营视图',
+    title: '工作留痕',
     group: '系统工具',
-    desc: '从运营健康度和本周动作观察经验库的沉淀、治理、复用和风险闭环。',
+    desc: '自动汇总新增、修改、采纳、删除等操作流水，保留操作人、对象、动作和时间。',
   },
 }
 
@@ -777,6 +791,7 @@ const operationCards = computed(() => {
     { label: '治理待办', value: incompleteList.value.length, hint: '低完整度经验' },
     { label: '风险资产', value: riskList.value.length, hint: '中高风险经验' },
     { label: '项目覆盖', value: projectLensRows.value.length, hint: '已有沉淀项目' },
+    { label: '留痕记录', value: recentOperationList.value.length, hint: '最近操作流水' },
     { label: '本地动作', value: localActionTotal, hint: '收藏对比笔记任务' },
   ]
 })
@@ -854,12 +869,19 @@ const reportText = computed(() => {
 const loadData = async () => {
   loading.value = true
   try {
-    const [listRes, dashboardRes] = await Promise.allSettled([getExperienceList({}), getDashboardData()])
+    const [listRes, dashboardRes, operationRes] = await Promise.allSettled([
+      getExperienceList({}),
+      getDashboardData(),
+      getRecentOperationRecordList(40),
+    ])
     if (listRes.status === 'fulfilled' && listRes.value.data.code === 200) {
       experienceList.value = listRes.value.data.data || []
     }
     if (dashboardRes.status === 'fulfilled' && dashboardRes.value.data.code === 200) {
       dashboard.value = dashboardRes.value.data.data || {}
+    }
+    if (operationRes.status === 'fulfilled' && operationRes.value.data.code === 200) {
+      recentOperationList.value = operationRes.value.data.data || []
     }
   } catch (error) {
     ElMessage.error('加载数据失败，请检查后端接口')
@@ -1016,6 +1038,27 @@ const tagAction = (status) => {
 const tagStatusWeight = (status) => {
   const weights = { 缺标签: 0, 偏少: 1, 偏散: 2, 良好: 3 }
   return weights[status] ?? 4
+}
+
+const operationMeta = {
+  CREATE: { label: '新增经验', type: 'success' },
+  UPDATE: { label: '修改经验', type: 'warning' },
+  ADOPT: { label: '采纳经验', type: 'success' },
+  DELETE: { label: '删除经验', type: 'danger' },
+}
+
+const operationTypeLabel = (type) => operationMeta[type]?.label || type || '未知操作'
+
+const operationTagType = (type) => operationMeta[type]?.type || 'info'
+
+const operationTargetTitle = (record) => {
+  const target = experienceList.value.find((item) => Number(item.id) === Number(record.experienceId))
+  return target?.title || `经验 #${record.experienceId || '-'}`
+}
+
+const formatDate = (value) => {
+  if (!value) return '-'
+  return String(value).replace('T', ' ').slice(0, 19)
 }
 
 function readStorage(key, fallback) {
@@ -1478,6 +1521,51 @@ onMounted(() => {
   font-size: 26px;
 }
 
+.audit-list {
+  display: grid;
+  gap: 12px;
+}
+
+.audit-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 14px;
+  padding: 14px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.audit-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.audit-head strong {
+  color: #111827;
+}
+
+.audit-item p {
+  margin: 0 0 6px;
+  color: #111827;
+  font-weight: 700;
+}
+
+.audit-item span {
+  color: #4b5563;
+  line-height: 1.6;
+}
+
+.audit-item em {
+  justify-self: end;
+  color: #6b7280;
+  font-size: 13px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
 @media (max-width: 1320px) {
   .stat-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1491,10 +1579,15 @@ onMounted(() => {
 @media (max-width: 900px) {
   .feature-header,
   .report-cover,
-  .rank-item {
+  .rank-item,
+  .audit-item {
     grid-template-columns: 1fr;
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .audit-item em {
+    justify-self: start;
   }
 
   .stat-grid,

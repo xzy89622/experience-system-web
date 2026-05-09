@@ -10,11 +10,51 @@ request.interceptors.request.use((config) => {
   if (token) {
     config.headers['X-Feishu-Token'] = token
   }
+  const adminToken = window.localStorage.getItem('admin_token')
+  if (adminToken) {
+    config.headers['X-Admin-Token'] = adminToken
+  }
   return config
 })
 
 export function getFeishuAuthConfig() {
   return request.get('/api/feishu-auth/config')
+}
+
+export function loginAdmin(data) {
+  return request.post('/api/admin/login', data)
+}
+
+export function getCurrentAdmin() {
+  return request.get('/api/admin/me')
+}
+
+export function getAdminUsers() {
+  return request.get('/api/admin/users')
+}
+
+export function createAdminUser(data) {
+  return request.post('/api/admin/users', data)
+}
+
+export function getAdminMembers() {
+  return request.get('/api/admin/members')
+}
+
+export function getApprovalList(status = 'PENDING') {
+  return request.get('/api/admin/approvals/list', { params: { status } })
+}
+
+export function getApprovalStats() {
+  return request.get('/api/admin/approvals/stats')
+}
+
+export function approveApproval(data) {
+  return request.post('/api/admin/approvals/approve', data)
+}
+
+export function rejectApproval(data) {
+  return request.post('/api/admin/approvals/reject', data)
 }
 
 export function loginByFeishuCode(code) {
@@ -49,6 +89,10 @@ export function getExperienceDetail(id) {
 
 export function getExperienceRecordList(experienceId) {
   return request.get(`/api/experience/records/${experienceId}`)
+}
+
+export function getRecentOperationRecordList(limit = 30) {
+  return request.get('/api/experience/records/recent', { params: { limit } })
 }
 
 export function getExperienceAdoptRecordList(experienceId) {

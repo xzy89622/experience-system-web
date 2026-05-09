@@ -5,6 +5,9 @@
         <div class="eyebrow">知识工作台</div>
         <h2 class="workbench-title">项目经验沉淀与复用</h2>
         <p class="workbench-desc">把历史问题、解决方案、风险标签和复用动作集中在一个工作台里。</p>
+        <p class="operator-tip" :class="{ warning: !operatorReady }">
+          当前操作人：{{ currentOperatorName }}，{{ operatorReady ? '新增、修改、采纳、删除需管理员审核，通过后自动写入工作留痕。' : '未识别到飞书身份，请从飞书工作台入口进入后再操作。' }}
+        </p>
       </div>
 
       <div class="workbench-actions">
@@ -94,6 +97,28 @@
           </button>
         </div>
         <el-empty v-else description="暂无浏览记录" />
+      </el-card>
+
+      <el-card class="assistant-card" shadow="never">
+        <template #header>
+          <div class="card-header">
+            <span>最近留痕</span>
+            <el-tag type="success" effect="plain">{{ recentOperationList.length }} 条</el-tag>
+          </div>
+        </template>
+        <div v-if="recentOperationList.length" class="mini-list">
+          <div v-for="item in recentOperationList.slice(0, 5)" :key="item.id" class="mini-item audit-mini-item">
+            <div class="audit-line">
+              <el-tag size="small" :type="operationTagType(item.operationType)" effect="light">
+                {{ operationTypeLabel(item.operationType) }}
+              </el-tag>
+              <strong>{{ item.operatorName || '未记录用户' }}</strong>
+            </div>
+            <span>{{ operationTargetTitle(item) }} · {{ formatDate(item.createTime) }}</span>
+            <p>{{ item.operationContent || '暂无操作说明' }}</p>
+          </div>
+        </div>
+        <el-empty v-else description="暂无工作留痕" />
       </el-card>
     </section>
 
@@ -221,6 +246,7 @@
               <button class="title-button" @click="handleDetail(row)">{{ row.title }}</button>
               <div class="cell-meta">
                 <span>{{ row.projectName || '未填写项目' }}</span>
+                <span>{{ row.projectCode || '未填编号' }}</span>
                 <span>{{ row.industry || '综合' }}</span>
                 <span>{{ row.projectType || '咨询服务' }}</span>
               </div>
@@ -326,6 +352,7 @@
               <h3>{{ detailData.title }}</h3>
               <div class="detail-meta">
                 <span>{{ detailData.projectName }}</span>
+                <span>{{ detailData.projectCode || '未填写编号' }}</span>
                 <span>{{ detailData.problemType || '综合管理' }}</span>
                 <span>{{ formatDate(detailData.updateTime) }}</span>
               </div>
@@ -400,6 +427,10 @@
                     <strong>{{ detailData.projectName || '未填写项目' }}</strong>
                   </div>
                   <div>
+                    <span>项目编号</span>
+                    <strong>{{ detailData.projectCode || '未填写编号' }}</strong>
+                  </div>
+                  <div>
                     <span>问题类型</span>
                     <strong>{{ detailData.problemType || '综合管理' }}</strong>
                   </div>
@@ -465,6 +496,24 @@
             <el-progress :percentage="completionPercent(detailData)" :stroke-width="8" />
           </div>
 
+          <div class="side-section">
+            <span class="side-label">工作留痕</span>
+            <div v-if="detailRecordList.length" class="trail-list compact">
+              <div v-for="item in detailRecordList.slice(0, 4)" :key="item.id" class="trail-item">
+                <div class="trail-head">
+                  <el-tag size="small" :type="operationTagType(item.operationType)" effect="light">
+                    {{ operationTypeLabel(item.operationType) }}
+                  </el-tag>
+                  <strong>{{ item.operatorName || '未记录用户' }}</strong>
+                </div>
+                <span>{{ formatDate(item.createTime) }}</span>
+                <p>{{ item.operationContent || '暂无操作说明' }}</p>
+              </div>
+            </div>
+            <el-empty v-else description="暂无留痕" :image-size="56" />
+            <el-button class="note-save" :icon="Notebook" @click="handleRecord(detailData)">查看完整留痕</el-button>
+          </div>
+
           <div class="side-metrics">
             <div>
               <strong>{{ detailData.viewCount || 0 }}</strong>
@@ -507,22 +556,41 @@
       </div>
     </el-dialog>
 
-    <el-dialog v-model="recordVisible" title="修改记录" width="900px">
-      <el-table :data="recordTableData" border style="width: 100%">
-        <el-table-column prop="id" label="记录ID" width="110" />
-        <el-table-column label="操作类型" width="120">
-          <template #default="{ row }">
-            <el-tag effect="plain">{{ row.operationType }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="operatorName" label="操作人" width="120" />
-        <el-table-column prop="operationContent" label="操作内容" min-width="420" show-overflow-tooltip />
-        <el-table-column label="操作时间" width="180">
-          <template #default="{ row }">
-            {{ formatDate(row.createTime) }}
-          </template>
-        </el-table-column>
-      </el-table>
+    <el-dialog v-model="recordVisible" title="工作留痕" width="960px">
+      <div class="record-summary">
+        <div>
+          <span>留痕总数</span>
+          <strong>{{ recordTableData.length }}</strong>
+        </div>
+        <div>
+          <span>参与人员</span>
+          <strong>{{ recordOperatorCount }}</strong>
+        </div>
+        <div>
+          <span>最近操作</span>
+          <strong>{{ recordTableData[0] ? operationTypeLabel(recordTableData[0].operationType) : '-' }}</strong>
+        </div>
+      </div>
+
+      <el-timeline v-if="recordTableData.length" class="record-timeline">
+        <el-timeline-item
+          v-for="item in recordTableData"
+          :key="item.id"
+          :timestamp="formatDate(item.createTime)"
+          placement="top"
+        >
+          <div class="record-card">
+            <div class="trail-head">
+              <el-tag :type="operationTagType(item.operationType)" effect="light">
+                {{ operationTypeLabel(item.operationType) }}
+              </el-tag>
+              <strong>{{ item.operatorName || '未记录用户' }}</strong>
+            </div>
+            <p>{{ item.operationContent || '暂无操作说明' }}</p>
+          </div>
+        </el-timeline-item>
+      </el-timeline>
+      <el-empty v-else description="暂无工作留痕" />
     </el-dialog>
 
     <el-dialog v-model="adoptRecordVisible" title="采纳记录" width="900px">
@@ -553,20 +621,30 @@
             <el-input v-model="formData.projectName" placeholder="请输入项目名称" />
           </el-form-item>
 
-          <el-form-item label="行业领域">
-            <el-input v-model="formData.industry" placeholder="如：政务、制造、金融" />
+          <el-form-item label="项目编号">
+            <el-input v-model="formData.projectCode" placeholder="请输入项目编号" />
           </el-form-item>
 
           <el-form-item label="项目类型">
             <el-input v-model="formData.projectType" placeholder="如：咨询服务、系统建设" />
           </el-form-item>
 
-          <el-form-item v-if="formMode === 'add'" label="创建人" prop="creatorName">
-            <el-input v-model="formData.creatorName" placeholder="请输入创建人姓名" />
+          <el-form-item label="行业领域">
+            <el-input v-model="formData.industry" placeholder="如：政务、制造、金融" />
           </el-form-item>
 
-          <el-form-item v-else label="本次修改人" prop="updaterName">
-            <el-input v-model="formData.updaterName" placeholder="请输入本次修改人姓名" />
+          <el-form-item v-if="formMode === 'add'" label="创建人">
+            <div class="operator-field">
+              <el-input :model-value="currentOperatorName" disabled />
+              <span>{{ operatorHint }}</span>
+            </div>
+          </el-form-item>
+
+          <el-form-item v-else label="本次修改人">
+            <div class="operator-field">
+              <el-input :model-value="currentOperatorName" disabled />
+              <span>{{ operatorHint }}</span>
+            </div>
           </el-form-item>
         </div>
 
@@ -653,14 +731,17 @@
 
       <template #footer>
         <el-button @click="formVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitForm">{{ formMode === 'add' ? '提交' : '保存' }}</el-button>
+        <el-button type="primary" @click="submitForm">{{ formMode === 'add' ? '提交新增审核' : '提交修改审核' }}</el-button>
       </template>
     </el-dialog>
 
     <el-dialog v-model="adoptVisible" title="采纳意见" width="620px">
       <el-form :model="adoptFormData" :rules="adoptRules" ref="adoptFormRef" label-width="100px">
-        <el-form-item label="采纳人" prop="adopterName">
-          <el-input v-model="adoptFormData.adopterName" placeholder="请输入采纳人姓名" />
+        <el-form-item label="采纳人">
+          <div class="operator-field">
+            <el-input :model-value="currentOperatorName" disabled />
+            <span>{{ operatorHint }}</span>
+          </div>
         </el-form-item>
 
         <el-form-item label="采纳说明" prop="adoptComment">
@@ -675,7 +756,7 @@
 
       <template #footer>
         <el-button @click="adoptVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitAdopt">确认采纳</el-button>
+        <el-button type="primary" @click="submitAdopt">提交采纳审核</el-button>
       </template>
     </el-dialog>
 
@@ -832,7 +913,9 @@ import {
   getExperienceById,
   getExperienceDetail,
   getExperienceRecordList,
+  getRecentOperationRecordList,
   getExperienceAdoptRecordList,
+  getCurrentFeishuUser,
   addExperience,
   updateExperience,
   analyzeExperience,
@@ -865,6 +948,8 @@ function writeStorage(key, value) {
 
 const loading = ref(false)
 const tableData = ref([])
+const currentUser = ref(readStorage('feishu_user', {}))
+const feishuSessionToken = ref(window.localStorage.getItem('feishu_session_token') || '')
 
 const keyword = ref('')
 const projectName = ref('')
@@ -1010,6 +1095,8 @@ const reportNote = computed(() => {
 
 const recordVisible = ref(false)
 const recordTableData = ref([])
+const detailRecordList = ref([])
+const recentOperationList = ref([])
 
 const adoptRecordVisible = ref(false)
 const adoptRecordTableData = ref([])
@@ -1030,20 +1117,35 @@ const adoptFormData = ref({
 })
 
 const formTitle = computed(() => (formMode.value === 'add' ? '新增经验' : '编辑经验'))
+const operatorReady = computed(() => !!feishuSessionToken.value && !!currentUser.value?.name)
+const currentOperatorName = computed(() => (operatorReady.value ? currentUser.value.name : '未识别身份'))
+const operatorHint = computed(() => (
+  operatorReady.value
+    ? '飞书免登身份，管理员审核通过后自动记录到工作留痕。'
+    : '未识别到飞书身份，请从飞书工作台入口进入或重新进行飞书免登。'
+))
 
 const formRules = {
   title: [{ required: true, message: '请输入经验标题', trigger: 'blur' }],
   projectName: [{ required: true, message: '请输入项目名称', trigger: 'blur' }],
-  creatorName: [{ required: true, message: '请输入创建人姓名', trigger: 'blur' }],
-  updaterName: [{ required: true, message: '请输入本次修改人姓名', trigger: 'blur' }],
   problemDesc: [{ required: true, message: '请输入问题描述', trigger: 'blur' }],
   summary: [{ required: true, message: '请输入经验总结', trigger: 'blur' }],
 }
 
 const adoptRules = {
-  adopterName: [{ required: true, message: '请输入采纳人姓名', trigger: 'blur' }],
   adoptComment: [{ required: true, message: '请输入采纳说明', trigger: 'blur' }],
 }
+
+const operationMeta = {
+  CREATE: { label: '新增经验', type: 'success' },
+  UPDATE: { label: '修改经验', type: 'warning' },
+  ADOPT: { label: '采纳经验', type: 'success' },
+  DELETE: { label: '删除经验', type: 'danger' },
+}
+
+const recordOperatorCount = computed(() => {
+  return new Set(recordTableData.value.map((item) => item.operatorName).filter(Boolean)).size
+})
 
 const visibleTableData = computed(() => {
   if (!favoriteOnly.value) {
@@ -1099,6 +1201,7 @@ const detailBlocks = computed(() => {
 
 const compareFields = [
   { label: '项目名称', field: 'projectName' },
+  { label: '项目编号', field: 'projectCode' },
   { label: '问题类型', field: 'problemType' },
   { label: '风险等级', field: 'riskLevel' },
   { label: '复用价值', field: 'referenceValueScore', suffix: '分' },
@@ -1136,6 +1239,7 @@ function createEmptyForm() {
     id: null,
     title: '',
     projectName: '',
+    projectCode: '',
     industry: '',
     projectType: '',
     problemType: '',
@@ -1196,6 +1300,54 @@ const loadData = async () => {
   }
 }
 
+const loadRecentOperations = async () => {
+  try {
+    const res = await getRecentOperationRecordList(30)
+    if (res.data.code === 200) {
+      recentOperationList.value = res.data.data || []
+    }
+  } catch (error) {
+    recentOperationList.value = []
+  }
+}
+
+const refreshCurrentUser = async () => {
+  const token = window.localStorage.getItem('feishu_session_token')
+  feishuSessionToken.value = token || ''
+  if (!token) {
+    currentUser.value = {}
+    window.localStorage.removeItem('feishu_user')
+    return
+  }
+
+  try {
+    const res = await getCurrentFeishuUser()
+    if (res.data.code === 200 && res.data.data) {
+      currentUser.value = res.data.data
+      writeStorage('feishu_user', res.data.data)
+    } else {
+      feishuSessionToken.value = ''
+      currentUser.value = {}
+      window.localStorage.removeItem('feishu_session_token')
+      window.localStorage.removeItem('feishu_user')
+    }
+  } catch (error) {
+    feishuSessionToken.value = ''
+    currentUser.value = {}
+    window.localStorage.removeItem('feishu_session_token')
+    window.localStorage.removeItem('feishu_user')
+  }
+}
+
+const ensureOperatorReady = async () => {
+  await refreshCurrentUser()
+  if (operatorReady.value) {
+    return true
+  }
+  ElMessage.warning('未识别到飞书身份，请从飞书工作台入口进入后再提交操作')
+  return false
+}
+
 const handleSearch = () => {
   loadData()
 }
@@ -1225,13 +1377,15 @@ const handleDetail = async (row) => {
 
     detailData.value = res.data.data
     currentNote.value = noteMap.value[String(detailData.value.id)] || ''
+    detailRecordList.value = []
     detailVisible.value = true
     pushRecentView(detailData.value)
     loadData()
 
-    const [recommendRes, actionRes] = await Promise.allSettled([
+    const [recommendRes, actionRes, recordRes] = await Promise.allSettled([
       getReuseRecommendList(row.id),
       getActionPlan(row.id),
+      getExperienceRecordList(row.id),
     ])
 
     recommendList.value =
@@ -1241,6 +1395,10 @@ const handleDetail = async (row) => {
     actionPlanList.value =
       actionRes.status === 'fulfilled' && actionRes.value.data.code === 200
         ? actionRes.value.data.data || []
+        : []
+    detailRecordList.value =
+      recordRes.status === 'fulfilled' && recordRes.value.data.code === 200
+        ? recordRes.value.data.data || []
         : []
   } catch (error) {
     ElMessage.error('获取详情失败')
@@ -1252,12 +1410,15 @@ const handleRecord = async (row) => {
     const res = await getExperienceRecordList(row.id)
     if (res.data.code === 200) {
       recordTableData.value = res.data.data || []
+      if (detailData.value?.id === row.id) {
+        detailRecordList.value = recordTableData.value
+      }
       recordVisible.value = true
     } else {
-      ElMessage.error('获取修改记录失败')
+      ElMessage.error('获取工作留痕失败')
     }
   } catch (error) {
-    ElMessage.error('获取修改记录失败')
+    ElMessage.error('获取工作留痕失败')
   }
 }
 
@@ -1277,19 +1438,22 @@ const handleAdoptRecord = async (row) => {
 
 const handleDelete = async (row) => {
   try {
-    await ElMessageBox.confirm(`确定删除《${row.title}》吗？`, '提示', {
-      confirmButtonText: '确定',
+    if (!(await ensureOperatorReady())) return
+
+    await ElMessageBox.confirm(`确定提交《${row.title}》的删除审核吗？管理员通过后才会删除。`, '提交删除审核', {
+      confirmButtonText: '提交审核',
       cancelButtonText: '取消',
       type: 'warning',
     })
 
     const res = await deleteExperience(row.id)
     if (res.data.code === 200 && res.data.data === true) {
-      ElMessage.success('删除成功')
+      ElMessage.success('删除申请已提交，管理员通过后生效')
       loadData()
       loadFilterOptions()
+      loadRecentOperations()
     } else {
-      ElMessage.error('删除失败，该数据可能不存在')
+      ElMessage.error(res.data.msg || '提交删除审核失败，该数据可能已有待审核操作')
     }
   } catch (error) {
   }
@@ -1298,6 +1462,8 @@ const handleDelete = async (row) => {
 const openAddDialog = () => {
   formMode.value = 'add'
   formData.value = createEmptyForm()
+  formData.value.creatorName = operatorReady.value ? currentOperatorName.value : ''
+  formData.value.updaterName = operatorReady.value ? currentOperatorName.value : ''
   analysisResult.value = null
   formVisible.value = true
 }
@@ -1400,7 +1566,7 @@ const openEditDialog = async (row) => {
       formData.value = {
         ...createEmptyForm(),
         ...res.data.data,
-        updaterName: '',
+        updaterName: operatorReady.value ? currentOperatorName.value : '',
         referenceValueScore: normalizeScore(res.data.data.referenceValueScore),
       }
       analysisResult.value = null
@@ -1415,9 +1581,13 @@ const openEditDialog = async (row) => {
 
 const submitForm = async () => {
   if (!formRef.value) return
+  if (!(await ensureOperatorReady())) return
 
   if (formMode.value === 'add') {
-    formData.value.updaterName = formData.value.creatorName
+    formData.value.creatorName = currentOperatorName.value
+    formData.value.updaterName = currentOperatorName.value
+  } else {
+    formData.value.updaterName = currentOperatorName.value
   }
 
   await formRef.value.validate(async (valid) => {
@@ -1427,10 +1597,11 @@ const submitForm = async () => {
       const payload = sanitizeExperience(formData.value)
       const res = formMode.value === 'add' ? await addExperience(payload) : await updateExperience(payload)
       if (res.data.code === 200 && res.data.data === true) {
-        ElMessage.success(formMode.value === 'add' ? '新增成功' : '编辑成功')
+        ElMessage.success(formMode.value === 'add' ? '新增申请已提交，管理员通过后生效' : '修改申请已提交，管理员通过后生效')
         formVisible.value = false
         loadData()
         loadFilterOptions()
+        loadRecentOperations()
       } else {
         ElMessage.error(res.data.msg || '保存失败')
       }
@@ -1484,7 +1655,7 @@ const applyAnalysisResult = () => {
 const openAdoptDialog = (row) => {
   adoptFormData.value = {
     experienceId: row.id,
-    adopterName: '',
+    adopterName: operatorReady.value ? currentOperatorName.value : '',
     adoptComment: '',
   }
   adoptVisible.value = true
@@ -1497,19 +1668,19 @@ const submitAdopt = async () => {
     if (!valid) return
 
     try {
+      if (!(await ensureOperatorReady())) return
+      adoptFormData.value.adopterName = currentOperatorName.value
       const res = await adoptExperience(adoptFormData.value)
       if (res.data.code === 200 && res.data.data === true) {
-        ElMessage.success('采纳成功')
+        ElMessage.success('采纳申请已提交，管理员通过后生效')
         adoptVisible.value = false
         loadData()
-        if (detailData.value?.id === adoptFormData.value.experienceId) {
-          detailData.value.adoptCount = Number(detailData.value.adoptCount || 0) + 1
-        }
+        loadRecentOperations()
       } else {
-        ElMessage.error('采纳失败')
+        ElMessage.error(res.data.msg || '提交采纳审核失败')
       }
     } catch (error) {
-      ElMessage.error('采纳失败，请检查后端接口')
+      ElMessage.error('提交采纳审核失败，请检查后端接口')
     }
   })
 }
@@ -1559,6 +1730,7 @@ const normalizeCompareItem = (row) => ({
   id: row.id,
   title: row.title,
   projectName: row.projectName,
+  projectCode: row.projectCode,
   problemType: row.problemType,
   riskLevel: row.riskLevel,
   referenceValueScore: row.referenceValueScore,
@@ -1639,6 +1811,15 @@ const riskTagType = (level) => {
   return 'success'
 }
 
+const operationTypeLabel = (type) => operationMeta[type]?.label || type || '未知操作'
+
+const operationTagType = (type) => operationMeta[type]?.type || 'info'
+
+const operationTargetTitle = (record) => {
+  const target = tableData.value.find((item) => Number(item.id) === Number(record.experienceId))
+  return target?.title || `经验 #${record.experienceId || '-'}`
+}
+
 const normalizeScore = (score) => {
   const value = Number(score || 0)
   return Math.max(0, Math.min(100, Math.round(value)))
@@ -1713,6 +1894,7 @@ const buildReuseReport = (item) => {
     `# ${item.title || '未命名经验'}`,
     '',
     `项目：${item.projectName || '未填写项目'}`,
+    `项目编号：${item.projectCode || '未填写编号'}`,
     `问题类型：${item.problemType || '综合管理'}`,
     `风险等级：${item.riskLevel || '低'}`,
     `复用价值：${normalizeScore(item.referenceValueScore)}分`,
@@ -1767,11 +1949,12 @@ const exportCsv = () => {
     return
   }
 
-  const headers = ['ID', '标题', '项目', '问题类型', '风险等级', '标签', '价值评分', '浏览量', '采纳次数', '创建人', '更新时间']
+  const headers = ['ID', '标题', '项目', '项目编号', '问题类型', '风险等级', '标签', '价值评分', '浏览量', '采纳次数', '创建人', '更新时间']
   const rows = visibleTableData.value.map((item) => [
     item.id,
     item.title,
     item.projectName,
+    item.projectCode,
     item.problemType,
     item.riskLevel,
     item.tags,
@@ -1795,8 +1978,10 @@ const exportCsv = () => {
 }
 
 onMounted(() => {
+  refreshCurrentUser()
   loadData()
   loadFilterOptions()
+  loadRecentOperations()
 })
 </script>
 
@@ -1835,6 +2020,17 @@ onMounted(() => {
 .workbench-desc {
   margin: 10px 0 0;
   color: #6b7280;
+}
+
+.operator-tip {
+  margin: 10px 0 0;
+  color: #1677ff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.operator-tip.warning {
+  color: #e6a23c;
 }
 
 .workbench-actions,
@@ -1894,7 +2090,7 @@ onMounted(() => {
 
 .assistant-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -1940,6 +2136,36 @@ onMounted(() => {
 .mini-item span {
   color: #6b7280;
   font-size: 13px;
+}
+
+.audit-mini-item {
+  cursor: default;
+}
+
+.audit-line,
+.trail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.audit-line strong,
+.trail-head strong {
+  min-width: 0;
+  color: #111827;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-mini-item p,
+.trail-item p,
+.record-card p {
+  margin: 0;
+  color: #4b5563;
+  line-height: 1.6;
+  word-break: break-word;
 }
 
 .filter-card,
@@ -2181,7 +2407,7 @@ onMounted(() => {
 
 .report-meta-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   margin-top: 14px;
 }
@@ -2294,6 +2520,29 @@ onMounted(() => {
   border-bottom: 1px solid #eef2f7;
 }
 
+.trail-list {
+  display: grid;
+  gap: 10px;
+}
+
+.trail-list.compact {
+  gap: 8px;
+}
+
+.trail-item {
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+}
+
+.trail-item span {
+  display: block;
+  margin: 5px 0;
+  color: #6b7280;
+  font-size: 12px;
+}
+
 .side-metrics {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2350,6 +2599,60 @@ onMounted(() => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   column-gap: 16px;
+  align-items: start;
+}
+
+.operator-field {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+}
+
+.operator-field span {
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.record-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.record-summary div {
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+}
+
+.record-summary span {
+  display: block;
+  margin-bottom: 6px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.record-summary strong {
+  color: #111827;
+  font-size: 20px;
+}
+
+.record-timeline {
+  padding-right: 8px;
+}
+
+.record-card {
+  padding: 14px 16px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.record-card p {
+  margin-top: 10px;
 }
 
 .analysis-panel {
@@ -2546,6 +2849,7 @@ onMounted(() => {
   .reuse-report-hero,
   .report-meta-grid,
   .report-section-grid,
+  .record-summary,
   .template-grid,
   .compare-selected-list,
   .compare-candidate-grid {

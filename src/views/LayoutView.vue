@@ -33,8 +33,8 @@
         </div>
 
         <div v-show="!isCollapsed" class="sidebar-card">
-          <div class="sidebar-card-title">复用闭环</div>
-          <div class="sidebar-card-text">收藏、对比、笔记、任务、报告已接入</div>
+          <div class="sidebar-card-title">审核闭环</div>
+          <div class="sidebar-card-text">业务入口与管理后台已分组，经验变更需审核后生效</div>
         </div>
       </div>
 
@@ -82,6 +82,7 @@ import {
   Finished,
   Fold,
   Link,
+  Lock,
   MagicStick,
   Notebook,
   SetUp,
@@ -91,6 +92,7 @@ import {
   TrendCharts,
   WarningFilled,
 } from '@element-plus/icons-vue'
+import { getCurrentFeishuUser } from '../api/experience'
 
 const route = useRoute()
 const currentUser = ref({})
@@ -100,43 +102,44 @@ const pageTitle = computed(() => route.meta?.title || '系统首页')
 
 const menuGroups = [
   {
-    title: '知识沉淀',
+    title: '业务工作台',
     items: [
       { label: '经验知识工作台', to: '/experience', icon: CollectionTag },
-      { label: '本地AI助手', to: '/local-ai', icon: MagicStick },
       { label: '项目复用作战室', to: '/playbook', icon: MagicStick },
-      { label: '模板中心', to: '/templates', icon: Tickets },
-      { label: '标签治理', to: '/tag-governance', icon: CollectionTag },
-      { label: '待完善经验', to: '/improvement', icon: EditPen },
-      { label: '项目视角', to: '/project-lens', icon: Connection },
+      { label: '本地AI助手', to: '/local-ai', icon: MagicStick },
+      { label: '场景演练', to: '/scenario-drill', icon: MagicStick },
+      { label: '智能推荐', to: '/recommendations', icon: TrendCharts },
     ],
   },
   {
-    title: '复用协同',
+    title: '个人协同',
     items: [
-      { label: '智能推荐', to: '/recommendations', icon: TrendCharts },
-      { label: '场景演练', to: '/scenario-drill', icon: MagicStick },
       { label: '收藏夹', to: '/favorites', icon: Star },
       { label: '复用任务', to: '/reuse-tasks', icon: Finished },
       { label: '采纳跟踪', to: '/adoption-tracking', icon: Finished },
       { label: '最近浏览', to: '/recent', icon: Timer },
       { label: '个人笔记', to: '/notes', icon: Notebook },
+      { label: '模板中心', to: '/templates', icon: Tickets },
     ],
   },
   {
-    title: '风险洞察',
+    title: '知识治理',
     items: [
       { label: '统计看板', to: '/dashboard', icon: DataAnalysis },
       { label: '风险预警', to: '/risk-warning', icon: WarningFilled },
+      { label: '标签治理', to: '/tag-governance', icon: CollectionTag },
+      { label: '待完善经验', to: '/improvement', icon: EditPen },
+      { label: '项目视角', to: '/project-lens', icon: Connection },
       { label: '知识图谱', to: '/knowledge-map', icon: Connection },
       { label: '报告中心', to: '/reports', icon: Document },
     ],
   },
   {
-    title: '系统工具',
+    title: '管理后台',
     items: [
+      { label: '管理员审核', to: '/admin-review', icon: Lock },
+      { label: '工作留痕', to: '/operations', icon: TrendCharts },
       { label: '飞书集成', to: '/feishu', icon: Link },
-      { label: '运营视图', to: '/operations', icon: TrendCharts },
       { label: '工具设置', to: '/settings', icon: SetUp },
     ],
   },
@@ -194,11 +197,28 @@ onBeforeUnmount(() => {
   stopResize()
 })
 
-onMounted(() => {
+onMounted(async () => {
+  const token = window.localStorage.getItem('feishu_session_token')
+  if (!token) {
+    currentUser.value = {}
+    window.localStorage.removeItem('feishu_user')
+    return
+  }
+
   try {
-    currentUser.value = JSON.parse(window.localStorage.getItem('feishu_user') || '{}')
+    const res = await getCurrentFeishuUser()
+    if (res.data.code === 200 && res.data.data) {
+      currentUser.value = res.data.data
+      window.localStorage.setItem('feishu_user', JSON.stringify(res.data.data))
+    } else {
+      currentUser.value = {}
+      window.localStorage.removeItem('feishu_session_token')
+      window.localStorage.removeItem('feishu_user')
+    }
   } catch (error) {
     currentUser.value = {}
+    window.localStorage.removeItem('feishu_session_token')
+    window.localStorage.removeItem('feishu_user')
   }
 })
 </script>

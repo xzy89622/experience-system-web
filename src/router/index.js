@@ -8,6 +8,7 @@ import LocalAiView from '../views/LocalAiView.vue'
 import ScenarioDrillView from '../views/ScenarioDrillView.vue'
 import FeishuIntegrationView from '../views/FeishuIntegrationView.vue'
 import FeishuAuthView from '../views/FeishuAuthView.vue'
+import AdminReviewView from '../views/AdminReviewView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -196,8 +197,16 @@ const router = createRouter({
           name: 'operations',
           component: FeatureCenterView,
           meta: {
-            title: '运营视图',
+            title: '工作留痕',
             featureKey: 'operations',
+          },
+        },
+        {
+          path: 'admin-review',
+          name: 'admin-review',
+          component: AdminReviewView,
+          meta: {
+            title: '管理员审核',
           },
         },
         {
