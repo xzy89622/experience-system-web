@@ -49,6 +49,10 @@ export function getApprovalStats() {
   return request.get('/api/admin/approvals/stats')
 }
 
+export function getMyApprovalList(status = 'ALL') {
+  return request.get('/api/experience/approvals/mine', { params: { status } })
+}
+
 export function approveApproval(data) {
   return request.post('/api/admin/approvals/approve', data)
 }

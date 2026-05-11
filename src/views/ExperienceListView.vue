@@ -12,6 +12,9 @@
 
       <div class="workbench-actions">
         <el-button :icon="Tickets" @click="templateVisible = true">写作模板</el-button>
+        <el-button :icon="Notebook" :type="myApprovalAttentionCount ? 'warning' : ''" @click="openMyApprovalDrawer">
+          审核状态 {{ myApprovalAttentionCount || '' }}
+        </el-button>
         <el-button :icon="Star" :type="favoriteOnly ? 'warning' : ''" @click="toggleFavoriteFilter">
           收藏夹 {{ favoriteIds.length }}
         </el-button>
@@ -839,6 +842,75 @@
       </template>
     </el-dialog>
 
+    <el-drawer v-model="myApprovalVisible" title="我的审核" size="72%" @open="loadMyApprovals">
+      <div class="approval-toolbar">
+        <div class="approval-stat-row">
+          <span>待审核 {{ myApprovalStats.pending }}</span>
+          <span>已通过 {{ myApprovalStats.approved }}</span>
+          <span>已驳回 {{ myApprovalStats.rejected }}</span>
+        </div>
+        <div class="approval-toolbar-actions">
+          <el-radio-group v-model="myApprovalStatus">
+            <el-radio-button label="ALL">全部</el-radio-button>
+            <el-radio-button label="PENDING">待审核</el-radio-button>
+            <el-radio-button label="APPROVED">已通过</el-radio-button>
+            <el-radio-button label="REJECTED">已驳回</el-radio-button>
+          </el-radio-group>
+          <el-button :icon="Refresh" @click="loadMyApprovals">刷新</el-button>
+        </div>
+      </div>
+
+      <el-table :data="filteredMyApprovalList" border style="width: 100%" v-loading="myApprovalLoading">
+        <el-table-column label="操作" width="110">
+          <template #default="{ row }">
+            <el-tag :type="operationTagType(row.actionType)" effect="light">
+              {{ operationTypeLabel(row.actionType) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="经验对象" min-width="200">
+          <template #default="{ row }">
+            {{ approvalTargetTitle(row) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="110">
+          <template #default="{ row }">
+            <el-tag :type="approvalStatusTagType(row.status)" effect="plain">
+              {{ approvalStatusLabel(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="申请摘要" min-width="280">
+          <template #default="{ row }">
+            <span class="summary-text">{{ approvalSummary(row) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="审核意见" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.reviewComment || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="申请时间" width="170">
+          <template #default="{ row }">{{ formatDate(row.createTime) }}</template>
+        </el-table-column>
+        <el-table-column label="审核时间" width="170">
+          <template #default="{ row }">{{ formatDate(row.reviewTime) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="150" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="canRetryApproval(row)"
+              link
+              type="primary"
+              @click="handleRetryApproval(row)"
+            >
+              {{ approvalRetryLabel(row) }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-drawer>
+
     <el-drawer v-model="compareVisible" title="经验对比" size="72%">
       <div class="compare-toolbar">
         <span>已选择 {{ compareItems.length }} 条经验</span>
@@ -916,6 +988,7 @@ import {
   getRecentOperationRecordList,
   getExperienceAdoptRecordList,
   getCurrentFeishuUser,
+  getMyApprovalList,
   addExperience,
   updateExperience,
   analyzeExperience,
@@ -1116,6 +1189,11 @@ const adoptFormData = ref({
   adoptComment: '',
 })
 
+const myApprovalVisible = ref(false)
+const myApprovalLoading = ref(false)
+const myApprovalStatus = ref('ALL')
+const myApprovalList = ref([])
+
 const formTitle = computed(() => (formMode.value === 'add' ? '新增经验' : '编辑经验'))
 const operatorReady = computed(() => !!feishuSessionToken.value && !!currentUser.value?.name)
 const currentOperatorName = computed(() => (operatorReady.value ? currentUser.value.name : '未识别身份'))
@@ -1143,6 +1221,12 @@ const operationMeta = {
   DELETE: { label: '删除经验', type: 'danger' },
 }
 
+const approvalStatusMeta = {
+  PENDING: { label: '待审核', type: 'warning' },
+  APPROVED: { label: '已通过', type: 'success' },
+  REJECTED: { label: '已驳回', type: 'danger' },
+}
+
 const recordOperatorCount = computed(() => {
   return new Set(recordTableData.value.map((item) => item.operatorName).filter(Boolean)).size
 })
@@ -1153,6 +1237,21 @@ const visibleTableData = computed(() => {
   }
   return tableData.value.filter((item) => isFavorite(item))
 })
+
+const filteredMyApprovalList = computed(() => {
+  if (myApprovalStatus.value === 'ALL') {
+    return myApprovalList.value
+  }
+  return myApprovalList.value.filter((item) => item.status === myApprovalStatus.value)
+})
+
+const myApprovalStats = computed(() => ({
+  pending: myApprovalList.value.filter((item) => item.status === 'PENDING').length,
+  approved: myApprovalList.value.filter((item) => item.status === 'APPROVED').length,
+  rejected: myApprovalList.value.filter((item) => item.status === 'REJECTED').length,
+}))
+
+const myApprovalAttentionCount = computed(() => myApprovalStats.value.pending + myApprovalStats.value.rejected)
 
 const metrics = computed(() => {
   const list = visibleTableData.value
@@ -1311,6 +1410,27 @@ const loadRecentOperations = async () => {
   }
 }
 
+const loadMyApprovals = async () => {
+  if (!operatorReady.value) {
+    myApprovalList.value = []
+    return
+  }
+
+  myApprovalLoading.value = true
+  try {
+    const res = await getMyApprovalList('ALL')
+    if (res.data.code === 200) {
+      myApprovalList.value = res.data.data || []
+    } else {
+      ElMessage.error(res.data.msg || '获取我的审核失败')
+    }
+  } catch (error) {
+    ElMessage.error('获取我的审核失败，请检查后端接口')
+  } finally {
+    myApprovalLoading.value = false
+  }
+}
+
 const refreshCurrentUser = async () => {
   const token = window.localStorage.getItem('feishu_session_token')
   feishuSessionToken.value = token || ''
@@ -1346,6 +1466,11 @@ const ensureOperatorReady = async () => {
   }
   ElMessage.warning('未识别到飞书身份，请从飞书工作台入口进入后再提交操作')
   return false
+}
+
+const openMyApprovalDrawer = async () => {
+  if (!(await ensureOperatorReady())) return
+  myApprovalVisible.value = true
 }
 
 const handleSearch = () => {
@@ -1452,10 +1577,97 @@ const handleDelete = async (row) => {
       loadData()
       loadFilterOptions()
       loadRecentOperations()
+      loadMyApprovals()
     } else {
       ElMessage.error(res.data.msg || '提交删除审核失败，该数据可能已有待审核操作')
     }
   } catch (error) {
+  }
+}
+
+const parseJson = (text) => {
+  if (!text) return {}
+  try {
+    return JSON.parse(text)
+  } catch (error) {
+    return {}
+  }
+}
+
+const approvalTargetTitle = (row) => {
+  const request = parseJson(row.requestContent)
+  return row.targetTitle || request.title || `经验 #${row.experienceId || '-'}`
+}
+
+const approvalSummary = (row) => {
+  const request = parseJson(row.requestContent)
+  if (row.actionType === 'CREATE') return `新增《${request.title || row.targetTitle || '未命名经验'}》`
+  if (row.actionType === 'UPDATE') return `修改《${row.targetTitle || request.title || '未命名经验'}》`
+  if (row.actionType === 'DELETE') return `删除《${row.targetTitle || request.title || '未命名经验'}》`
+  if (row.actionType === 'ADOPT') return `采纳说明：${request.adoptComment || '未填写'}`
+  return row.targetTitle || '-'
+}
+
+const approvalStatusLabel = (status) => approvalStatusMeta[status]?.label || status || '-'
+
+const approvalStatusTagType = (status) => approvalStatusMeta[status]?.type || 'info'
+
+const canRetryApproval = (row) => {
+  return row?.status === 'REJECTED' && ['CREATE', 'UPDATE', 'ADOPT', 'DELETE'].includes(row.actionType)
+}
+
+const approvalRetryLabel = (row) => {
+  if (row.actionType === 'DELETE') return '重新提交'
+  if (row.actionType === 'ADOPT') return '修改说明'
+  return '修改再提交'
+}
+
+const handleRetryApproval = async (row) => {
+  if (!(await ensureOperatorReady())) return
+
+  const request = parseJson(row.requestContent)
+  if (row.actionType === 'CREATE' || row.actionType === 'UPDATE') {
+    formMode.value = row.actionType === 'CREATE' ? 'add' : 'edit'
+    formData.value = {
+      ...createEmptyForm(),
+      ...request,
+      id: row.actionType === 'CREATE' ? null : (request.id || row.experienceId),
+      creatorName: row.actionType === 'CREATE' ? currentOperatorName.value : request.creatorName,
+      updaterName: currentOperatorName.value,
+      referenceValueScore: normalizeScore(request.referenceValueScore),
+    }
+    analysisResult.value = null
+    myApprovalVisible.value = false
+    formVisible.value = true
+    return
+  }
+
+  if (row.actionType === 'ADOPT') {
+    const experienceId = request.experienceId || row.experienceId
+    if (!experienceId) {
+      ElMessage.warning('未找到关联经验，无法重新提交采纳审核')
+      return
+    }
+    adoptFormData.value = {
+      experienceId,
+      adopterName: currentOperatorName.value,
+      adoptComment: request.adoptComment || '',
+    }
+    myApprovalVisible.value = false
+    adoptVisible.value = true
+    return
+  }
+
+  if (row.actionType === 'DELETE') {
+    const experienceId = request.experienceId || row.experienceId
+    if (!experienceId) {
+      ElMessage.warning('未找到关联经验，无法重新提交删除审核')
+      return
+    }
+    await handleDelete({
+      id: experienceId,
+      title: approvalTargetTitle(row),
+    })
   }
 }
 
@@ -1602,6 +1814,7 @@ const submitForm = async () => {
         loadData()
         loadFilterOptions()
         loadRecentOperations()
+        loadMyApprovals()
       } else {
         ElMessage.error(res.data.msg || '保存失败')
       }
@@ -1676,6 +1889,7 @@ const submitAdopt = async () => {
         adoptVisible.value = false
         loadData()
         loadRecentOperations()
+        loadMyApprovals()
       } else {
         ElMessage.error(res.data.msg || '提交采纳审核失败')
       }
@@ -1977,11 +2191,12 @@ const exportCsv = () => {
   URL.revokeObjectURL(url)
 }
 
-onMounted(() => {
-  refreshCurrentUser()
+onMounted(async () => {
+  await refreshCurrentUser()
   loadData()
   loadFilterOptions()
   loadRecentOperations()
+  loadMyApprovals()
 })
 </script>
 
@@ -2753,6 +2968,37 @@ onMounted(() => {
   flex: 1;
 }
 
+.approval-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.approval-stat-row,
+.approval-toolbar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.approval-stat-row span {
+  padding: 7px 10px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.summary-text {
+  color: #303133;
+  line-height: 1.6;
+}
+
 .compare-toolbar {
   display: flex;
   align-items: center;
@@ -2835,6 +3081,7 @@ onMounted(() => {
   .filter-footer,
   .detail-heading,
   .template-toolbar,
+  .approval-toolbar,
   .compare-toolbar {
     flex-direction: column;
     align-items: stretch;
